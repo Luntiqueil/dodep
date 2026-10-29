@@ -35,7 +35,8 @@
     color-scheme: dark;
   }
   [hidden] { display: none !important; }
-  html, body { height: 100%; }
+  /* one fixed screen: the page itself never scrolls, even when a button takes focus */
+  html, body { height: 100%; margin: 0; overflow: hidden; }
   body {
     background: var(--felt);
     color: var(--fg);
@@ -352,10 +353,15 @@
   }
   .bag-stage { display: grid; gap: 10px; }
   .bag-title { margin: 0; font-weight: 700; text-align: center; text-shadow: 1px 1px 0 var(--ink); }
-  .bags { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  /* minmax(0, 1fr) keeps columns fixed, so revealing a number never resizes the grid */
+  .bags { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .bags .bag {
     aspect-ratio: 1;
     padding: 0;
+    display: grid;
+    place-items: center;
+    line-height: 1;
+    overflow: hidden;
     font-size: clamp(30px, 10vw, 42px);
     background: linear-gradient(var(--wood), var(--wood-dark));
     border-radius: 14px;
@@ -368,6 +374,28 @@
     background: var(--title);
     cursor: default;
     transform: rotate(-3deg);
+    box-shadow: 3px 3px 0 var(--ink), 0 0 14px 3px var(--title);
+    animation: bag-pop 0.4s ease-out;
+  }
+  .bags .bag.opening { animation: bag-shake 0.3s ease-in-out; }
+  .bags .bag.open span { animation: bag-value 0.35s ease-out 0.05s both; }
+  @keyframes bag-shake {
+    0%, 100% { transform: rotate(0) scale(1); }
+    25% { transform: rotate(-12deg) scale(1.06); }
+    50% { transform: rotate(10deg) scale(1.08); }
+    75% { transform: rotate(-6deg) scale(1.04); }
+  }
+  @keyframes bag-pop {
+    0% { transform: scale(0.7) rotate(0); }
+    60% { transform: scale(1.12) rotate(-7deg); }
+    100% { transform: scale(1) rotate(-3deg); }
+  }
+  @keyframes bag-value {
+    from { transform: scale(0) translateY(10px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bags .bag.open, .bags .bag.opening, .bags .bag.open span { animation: none; }
   }
   .bags .bag:disabled { opacity: 1; }
 </style>
@@ -984,6 +1012,7 @@
   const SLOT_TICK_MS = 60;
   const SLOT_PAUSE_MS = 350;
   const SLOT_BAGS_DONE_MS = 900;
+  const BAG_SHAKE_MS = 300;
   const slotUi = {
     buy: $('bonusBtn'), screen: $('slotScreen'), reels: $('reels'), spins: $('slotSpins'),
     total: $('slotTotal'), verdict: $('slotVerdict'), collect: $('slotCollect'), ways: $('slotWays'),
@@ -1057,12 +1086,16 @@
         bag.className = 'bag';
         bag.textContent = '💰';
         bag.setAttribute('aria-label', `Мешочек ${i + 1}`);
-        bag.addEventListener('click', () => {
+        bag.addEventListener('click', async () => {
           if (bag.disabled) return;
           const value = rollBag(Math.random);
           bag.disabled = true;
-          bag.classList.add('open');
-          bag.textContent = `+${value}`;
+          bag.classList.add('opening');
+          await wait(BAG_SHAKE_MS);
+          bag.classList.replace('opening', 'open');
+          const label = document.createElement('span');
+          label.textContent = `+${value}`;
+          bag.replaceChildren(label);
           bag.setAttribute('aria-label', `Мешочек ${i + 1}: ${value} фриспин${value === 1 ? '' : 'а'}`);
           opened.count += 1;
           opened.spins += value;
@@ -1072,7 +1105,7 @@
         return bag;
       });
       slotUi.bags.replaceChildren(...bags);
-      bags[0].focus();
+      bags[0].focus({ preventScroll: true });
     });
   }
 
