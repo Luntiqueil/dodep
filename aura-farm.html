@@ -350,6 +350,26 @@
     .buy { font-size: 9px; padding: 3px 6px; box-shadow: 2px 2px 0 var(--ink); }
     .buy small { font-size: 9px; }
   }
+  .bag-stage { display: grid; gap: 10px; }
+  .bag-title { margin: 0; font-weight: 700; text-align: center; text-shadow: 1px 1px 0 var(--ink); }
+  .bags { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .bags .bag {
+    aspect-ratio: 1;
+    padding: 0;
+    font-size: clamp(30px, 10vw, 42px);
+    background: linear-gradient(var(--wood), var(--wood-dark));
+    border-radius: 14px;
+    box-shadow: 3px 3px 0 var(--ink);
+  }
+  .bags .bag.open {
+    font-family: var(--display);
+    font-size: clamp(18px, 6vw, 26px);
+    color: var(--ink);
+    background: var(--title);
+    cursor: default;
+    transform: rotate(-3deg);
+  }
+  .bags .bag:disabled { opacity: 1; }
 </style>
 
 <div class="app">
@@ -407,10 +427,14 @@
     <div class="overlay" id="slotScreen" hidden>
       <div class="card slot">
         <h2>Собачья будка</h2>
-        <div class="ways-board">СПОСОБОВ <b id="slotWays">0</b></div>
-        <p class="hint">7 фриспинов, 6 барабанов по 2–5 символов. Выигрыш — одинаковые символы на соседних барабанах слева. Будка с иксами — дикая: заменяет любой символ, иксы перемножаются. Прилипшая будка стоит на месте до конца этой бонуски.</p>
+        <div class="bag-stage" id="bagStage">
+          <p class="bag-title">Открой все 9 мешочков: в каждом от 1 до 3 фриспинов</p>
+          <div class="bags" id="bags"></div>
+        </div>
+        <div class="ways-board" id="waysBoard">СПОСОБОВ <b id="slotWays">0</b></div>
+        <p class="hint" id="slotRules">9–27 фриспинов из мешочков, 6 барабанов по 2–5 символов. Выигрыш — одинаковые символы на соседних барабанах слева. Будка с иксами — дикая: заменяет любой символ, иксы перемножаются. Прилипшая будка стоит на месте до конца этой бонуски.</p>
         <div class="reels" id="reels" aria-live="polite"></div>
-        <div class="slot-meta"><span>спин <b id="slotSpins">1 / 7</b></span><span>выигрыш <b id="slotTotal">0</b> ₽</span></div>
+        <div class="slot-meta"><span>фриспины <b id="slotSpins">0</b></span><span>выигрыш <b id="slotTotal">0</b> ₽</span></div>
         <p class="verdict" id="slotVerdict"></p>
         <button id="slotCollect" type="button" hidden>ЗАБРАТЬ</button>
       </div>
@@ -491,7 +515,10 @@
   const SLOT_REELS = 6;
   const SLOT_MIN_H = 2;
   const SLOT_MAX_H = 5;
-  const SLOT_FREE_SPINS = 7;
+  const SLOT_BAGS = 9;
+  const SLOT_BAG_MIN = 1;
+  const SLOT_BAG_MAX = 3;
+  const rollBag = rand => SLOT_BAG_MIN + Math.floor(rand() * (SLOT_BAG_MAX - SLOT_BAG_MIN + 1));
   const SLOT_WILD = '🏠';
   const SLOT_WILD_CHANCE = 0.03;
   const SLOT_WILD_REELS = [1, 2, 3, 4];
@@ -508,7 +535,7 @@
     { s: '10', weight: 14, pay: [0.1, 0.4, 1, 2.5] },
   ];
   // calibrated by simulation so a 1000 ₽ buy returns about 91% on average
-  const SLOT_PAY_SCALE = 1.34;
+  const SLOT_PAY_SCALE = 0.039;
   const SLOT_WEIGHT_TOTAL = SLOT_SYMBOLS.reduce((sum, sym) => sum + sym.weight, 0);
 
   function pickSymbol(rand) {
@@ -953,12 +980,14 @@
     requestAnimationFrame(frame);
   }
 
-  const SLOT_SPIN_MS = 650;
+  const SLOT_SPIN_MS = 500;
   const SLOT_TICK_MS = 60;
-  const SLOT_PAUSE_MS = 450;
+  const SLOT_PAUSE_MS = 350;
+  const SLOT_BAGS_DONE_MS = 900;
   const slotUi = {
     buy: $('bonusBtn'), screen: $('slotScreen'), reels: $('reels'), spins: $('slotSpins'),
     total: $('slotTotal'), verdict: $('slotVerdict'), collect: $('slotCollect'), ways: $('slotWays'),
+    bagStage: $('bagStage'), bags: $('bags'), waysBoard: $('waysBoard'), rules: $('slotRules'),
   };
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -1009,6 +1038,44 @@
     return { grid, win: result.win };
   }
 
+  function showBagStage(isBagStage) {
+    slotUi.bagStage.hidden = !isBagStage;
+    slotUi.reels.hidden = isBagStage;
+    slotUi.waysBoard.hidden = isBagStage;
+    slotUi.rules.hidden = isBagStage;
+  }
+
+  // 9 bags in a 3×3 grid; each tap reveals 1–3 free spins. Resolves with the total once all are open.
+  function pickBags() {
+    return new Promise(resolve => {
+      const opened = { count: 0, spins: 0 };
+      slotUi.spins.textContent = '0';
+      showBagStage(true);
+      const bags = Array.from({ length: SLOT_BAGS }, (_, i) => {
+        const bag = document.createElement('button');
+        bag.type = 'button';
+        bag.className = 'bag';
+        bag.textContent = '💰';
+        bag.setAttribute('aria-label', `Мешочек ${i + 1}`);
+        bag.addEventListener('click', () => {
+          if (bag.disabled) return;
+          const value = rollBag(Math.random);
+          bag.disabled = true;
+          bag.classList.add('open');
+          bag.textContent = `+${value}`;
+          bag.setAttribute('aria-label', `Мешочек ${i + 1}: ${value} фриспин${value === 1 ? '' : 'а'}`);
+          opened.count += 1;
+          opened.spins += value;
+          slotUi.spins.textContent = opened.spins;
+          if (opened.count === SLOT_BAGS) wait(SLOT_BAGS_DONE_MS).then(() => resolve(opened.spins));
+        });
+        return bag;
+      });
+      slotUi.bags.replaceChildren(...bags);
+      bags[0].focus();
+    });
+  }
+
   const verdictOf = ratio =>
     ratio < 0.5 ? 'Х1 В СОБАКАХ' : ratio < 1 ? 'НЕ ОТБИЛ' : ratio < 3 ? 'ОТБИЛ' : 'ЗАНОС!';
 
@@ -1032,11 +1099,13 @@
     slotUi.screen.hidden = false;
     stopAllSounds();
     playSound(introSound);
-    // every bonus starts on clean reels; houses stick only within its 7 spins
+    const freeSpins = await pickBags();
+    showBagStage(false);
+    // every bonus starts on clean reels; houses stick only within its free spins
     let sticky = emptySticky();
     let total = 0;
-    for (let spin = 1; spin <= SLOT_FREE_SPINS; spin += 1) {
-      slotUi.spins.textContent = `${spin} / ${SLOT_FREE_SPINS}`;
+    for (let spin = 1; spin <= freeSpins; spin += 1) {
+      slotUi.spins.textContent = `${spin} / ${freeSpins}`;
       const { grid, win } = await spinOnce(sticky);
       total += win;
       sticky = stickyOf(grid);
