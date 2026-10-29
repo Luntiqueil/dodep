@@ -374,7 +374,7 @@
 
 <div class="app">
   <header class="hud">
-    <h1 class="logo">ДО<span>·</span>ДЕП</h1>
+    <h1 class="logo" id="logo">ДО<span>·</span>ДЕП</h1>
     <div class="stats">
       <div class="chip"><small>баланс ₽</small><b id="score">0</b></div>
       <div class="chip"><small>иксы</small><b id="combo">x1</b></div>
@@ -1238,6 +1238,21 @@
   $('startBtn').addEventListener('click', startGame);
   $('againBtn').addEventListener('click', startGame);
   slotUi.buy.addEventListener('click', buyBonus);
+
+  // secret: 5 quick taps on the logo during a game add 10 000 ₽
+  const CHEAT_TAPS = 5;
+  const CHEAT_WINDOW_MS = 1500;
+  const CHEAT_BONUS = 10000;
+  const cheat = { taps: 0, timer: 0 };
+  $('logo').addEventListener('click', () => {
+    clearTimeout(cheat.timer);
+    cheat.taps += 1;
+    cheat.timer = setTimeout(() => { cheat.taps = 0; }, CHEAT_WINDOW_MS);
+    if (cheat.taps < CHEAT_TAPS || !state.running) return;
+    cheat.taps = 0;
+    state = { ...state, score: state.score + CHEAT_BONUS };
+    popup(W / 2, H * 0.5, `+${CHEAT_BONUS} ₽ ЧИТ`, C.gold, 2);
+  });
   shopUi.open.addEventListener('click', openShop);
   shopUi.close.addEventListener('click', closeShop);
   window.addEventListener('keydown', e => { if (e.key === 'Escape') closeShop(); });
